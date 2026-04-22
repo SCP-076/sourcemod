@@ -33,6 +33,7 @@ jobs:
       - name: Checkout SourceMod
         uses: actions/checkout@v6
         with:
+          ref: fix
           path: sourcemod
           fetch-depth: 0
           submodules: recursive
@@ -65,23 +66,7 @@ jobs:
         id: sdk_list
         shell: bash
         run: |
-            sdk_list=()
-            for file in sourcemod/hl2sdk-manifests/manifests/*.json; do
-              sdk=$(basename "$file" .json)
-              if [[ $sdk == "mock" ]]; then
-                continue
-              fi
-              platform=$(jq -r '.platforms.${{ matrix.platform }}' "$file")
-              if [[ -z $platform || $platform == "null" || ${#platform[@]} -eq 0 ]]; then
-                continue
-              fi
-              source2=$(jq -r '.source2' "$file")
-              if [[ $source2 == "null" || $source2 == "true" ]]; then
-                continue
-              fi
-              sdk_list+=("$sdk")
-            done
-            echo "sdk_list=$(printf '%s\n' "${sdk_list[@]}" | jq --raw-input . | jq --slurp --compact-output .)" >> $GITHUB_OUTPUT
+          echo 'sdk_list=["l4d2"]' >> $GITHUB_OUTPUT
       
       - name: Cache dependencies
         uses: actions/cache@v5
@@ -156,27 +141,11 @@ jobs:
           echo "filename=$filename" >> $GITHUB_OUTPUT
           echo "content_type=$content_type" >> $GITHUB_OUTPUT
         
-      - name: Create Release
-        id: create_release
-        uses: ncipollo/release-action@v1.21.0
+      - name: Upload Build Artifact
+        uses: actions/upload-artifact@v4
         with:
-          allowUpdates: true
-          replacesArtifacts: false
-          omitBodyDuringUpdate: true
-          omitDraftDuringUpdate: true
-          omitNameDuringUpdate: true
-          omitPrereleaseDuringUpdate: true
-          omitBody: true
-          artifacts: sourcemod/build/package/${{ steps.package.outputs.filename }}
-          artifactContentType: ${{ steps.package.outputs.content_type }}
-          artifactErrorsFailBuild: true
-          tag: ${{ steps.package.outputs.version }}
-          commit: ${{ github.sha }}
-          generateReleaseNotes: true
-          draft: false
-          prerelease: ${{ github.ref == 'refs/heads/master' }}
-          makeLatest: ${{ github.ref != 'refs/heads/master' }}
-          token: ${{ secrets.GITHUB_TOKEN }}
+          name: sourcemod-l4d2-build-${{ matrix.platform }}
+          path: sourcemod/build/package/${{ steps.package.outputs.filename }}
       
       - name: Output PDBs
         if: startsWith(matrix.os, 'windows')
