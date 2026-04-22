@@ -4,12 +4,10 @@ on:
     branches:
       - master
       - '[0-9]+.[0-9]+-dev'
-    workflow_dispatch:
+  workflow_dispatch:
 env:
   ARCH: x86,x86_64
   DUMP_SYMS_VERSION: '2.3.7'
-  # Used for caching
-  # TODO: Handle this better so that we don't have to update this in lockstep with checkout-deps
   MYSQL_VERSION: '5.7'
   MMSOURCE_VERSION: '1.12'
 jobs:
@@ -43,8 +41,6 @@ jobs:
         if: startsWith(matrix.os, 'windows')
         shell: pwsh
         run: |
-          # Add DIA SDK bin directory to PATH for dump_syms
-          # vswhere.exe is pre-installed on GitHub Windows runners
           $vsRoot = & vswhere -latest -property installationPath
           $diaDir = Join-Path $vsRoot 'DIA SDK\bin'
           $diaDir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
@@ -56,12 +52,9 @@ jobs:
           curl -sSL -o dump_syms.zip $dumpsymsUrl
           Expand-Archive -Path dump_syms.zip -DestinationPath .
           Remove-Item dump_syms.zip
-          # Flatten if extracted into a subdirectory
           Get-ChildItem -Recurse -Filter 'dump_syms.exe' | Move-Item -Destination . -ErrorAction SilentlyContinue
           Pop-Location
       
-      # Largely a workaround for issue where github.workspace doesn't match $GITHUB_WORKSPACE
-      # in containerized jobs. See https://github.com/actions/runner/issues/2058
       - name: Resolve paths
         id: path_helper
         shell: bash
@@ -76,20 +69,16 @@ jobs:
             for file in sourcemod/hl2sdk-manifests/manifests/*.json; do
               sdk=$(basename "$file" .json)
               if [[ $sdk == "mock" ]]; then
-                # We don't need to ship a build for the mock SDK
                 continue
               fi
-
               platform=$(jq -r '.platforms.${{ matrix.platform }}' "$file")
               if [[ -z $platform || $platform == "null" || ${#platform[@]} -eq 0 ]]; then
                 continue
               fi
-
               source2=$(jq -r '.source2' "$file")
               if [[ $source2 == "null" || $source2 == "true" ]]; then
                 continue
               fi
-
               sdk_list+=("$sdk")
             done
             echo "sdk_list=$(printf '%s\n' "${sdk_list[@]}" | jq --raw-input . | jq --slurp --compact-output .)" >> $GITHUB_OUTPUT
@@ -110,11 +99,8 @@ jobs:
         run: |
           mkdir -p '${{ steps.path_helper.outputs.dependencies }}'
           cd '${{ steps.path_helper.outputs.dependencies }}'
-
-          # Satisfy checkout-deps requirement for a "sourcemod" folder.
           mkdir -p sourcemod
           ../sourcemod/tools/checkout-deps.sh -s ${{ join(fromJson(steps.sdk_list.outputs.sdk_list), ',') }}
-
           if [ ! -f GeoLite2-City_20191217/GeoLite2-City.mmdb ]; then
             geotar="GeoLite2-City_20191217.tar.gz"
             curl -sSL "https://sm.alliedmods.net/$geotar" -o $geotar
@@ -143,7 +129,6 @@ jobs:
             '--mysql-path=${{ steps.path_helper.outputs.dependencies }}/mysql-${{ env.MYSQL_VERSION }}' \
             '--mysql64-path=${{ steps.path_helper.outputs.dependencies }}/mysql-${{ env.MYSQL_VERSION }}-x86_64'
           ambuild
-
           mkdir -p addons/sourcemod/configs/geoip
           cp '${{ steps.path_helper.outputs.dependencies }}/GeoLite2-City_20191217/GeoLite2-City.mmdb' addons/sourcemod/configs/geoip/GeoLite2-City.mmdb
       
@@ -153,11 +138,10 @@ jobs:
         shell: bash
         run: |
           version_base=$(cat ../../product.version)
-          version_base=${version_base%-dev} # Ex. 1.12.0
+          version_base=${version_base%-dev}
           version_rev=$(git rev-list --count HEAD)
           version="${version_base}.${version_rev}"
           expanded_version="${version_base}-git${version_rev}"
-
           if [ "${{ matrix.platform}}" == "windows" ]; then
             filename="sourcemod-${expanded_version}-${{ matrix.platform }}.zip"
             7z a "$filename" addons cfg
@@ -176,25 +160,19 @@ jobs:
         id: create_release
         uses: ncipollo/release-action@v1.21.0
         with:
-          # Windows and Linux packages will need to upload to the same release
           allowUpdates: true
           replacesArtifacts: false
           omitBodyDuringUpdate: true
           omitDraftDuringUpdate: true
           omitNameDuringUpdate: true
           omitPrereleaseDuringUpdate: true
-
-          # This gets overly large and meaningless with our existing release patterns
           omitBody: true
-
           artifacts: sourcemod/build/package/${{ steps.package.outputs.filename }}
           artifactContentType: ${{ steps.package.outputs.content_type }}
           artifactErrorsFailBuild: true
-
           tag: ${{ steps.package.outputs.version }}
           commit: ${{ github.sha }}
           generateReleaseNotes: true
-                    
           draft: false
           prerelease: ${{ github.ref == 'refs/heads/master' }}
           makeLatest: ${{ github.ref != 'refs/heads/master' }}
@@ -210,13 +188,11 @@ jobs:
           $buildDir = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath 'sourcemod/build'
           $outDir = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath 'pdbs'
           New-Item -ItemType Directory -Force -Path $outDir | Out-Null
-
           Get-Content -LiteralPath (Join-Path -Path $buildDir -ChildPath 'pdblog.txt') |
             ForEach-Object -Process {
               $fullPdbPathInfo = (Get-Item -Path (Join-Path -Path $buildDir -ChildPath $_))
               $baseName = $fullPdbPathInfo.BaseName
               $dir = $fullPdbPathInfo.DirectoryName
-              
               '.pdb', '.exe', '.dll' | ForEach-Object -Process {
                   $binPath = Join-Path $dir ($baseName + $_)
                   if (Test-Path $binPath) {
@@ -228,7 +204,7 @@ jobs:
       - name: Upload PDBs
         if: startsWith(matrix.os, 'windows')
         id: upload_pdbs
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: pdbs
           path: pdbs/*
