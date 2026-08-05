@@ -14,5 +14,5 @@
 	url = https://github.com/alliedmodders/safetyhook
 [submodule "smsharp"]
 	path = smsharp
-	url = https://github.com/SCP-076/smsharp.git
+	url = git@github.com:SCP-076/smsharp.git
 	branch = 1.13-dev
