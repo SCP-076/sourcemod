@@ -1,0 +1,135 @@
+name: sms Build Release
+on:
+  push:
+    branches:
+      - sms-1.13
+  workflow_dispatch:
+
+env:
+  ARCH: x86
+  SDKS: '["l4d2"]'
+  # Used for caching
+  MYSQL_VERSION: '5.7'
+  MMSOURCE_VERSION: '1.12'
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - platform: windows
+            os: windows-latest
+            os_short: win
+          - platform: linux
+            os: ubuntu-latest
+            os_short: linux
+            container_image: ghcr.io/alliedmodders/build-containers/debian11-clang22:latest
+      fail-fast: false
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    container:
+      image: ${{ matrix.container_image }}
+    steps:
+      - name: Checkout SourceMod
+        uses: actions/checkout@v7
+        with:
+          path: sourcemod
+          fetch-depth: 0
+          submodules: recursive
+          token: ${{ secrets.SUBMODULE_DEPLOY_KEY }}
+
+      # Largely a workaround for issue where github.workspace doesn't match $GITHUB_WORKSPACE
+      # in containerized jobs. See https://github.com/actions/runner/issues/2058
+      - name: Resolve paths
+        id: path_helper
+        shell: bash
+        run: |
+          echo "dependencies=$GITHUB_WORKSPACE/dependencies" >> $GITHUB_OUTPUT
+
+      - name: Cache dependencies
+        uses: actions/cache@v6
+        env:
+          cache-name: hl2sdk-mysql-mmsource
+        with:
+          path: ${{ steps.path_helper.outputs.dependencies }}
+          key: ${{ runner.os }}-build-${{ env.cache-name }}-mysql${{ env.MYSQL_VERSION }}-mmsource${{ env.MMSOURCE_VERSION }}-${{ join(fromJson(env.SDKS), '') }}
+          restore-keys: |
+            ${{ runner.os }}-build-${{ env.cache-name }}-mysql${{ env.MYSQL_VERSION }}-mmsource${{ env.MMSOURCE_VERSION }}-
+            ${{ runner.os }}-build-${{ env.cache-name }}-mysql${{ env.MYSQL_VERSION }}-
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          mkdir -p '${{ steps.path_helper.outputs.dependencies }}'
+          cd '${{ steps.path_helper.outputs.dependencies }}'
+
+          # Satisfy checkout-deps requirement for a "sourcemod" folder.
+          mkdir -p sourcemod
+          ../sourcemod/tools/checkout-deps.sh -s ${{ join(fromJson(env.SDKS), ',') }}
+
+      - name: Build
+        working-directory: sourcemod
+        shell: bash
+        run: |
+          mkdir build
+          cd build
+          python3 ../configure.py \
+            --enable-optimize \
+            --sdks=${{ join(fromJson(env.SDKS), ',') }} \
+            --targets=${{ env.ARCH }} \
+            '--mms-path=${{ steps.path_helper.outputs.dependencies }}/mmsource-${{ env.MMSOURCE_VERSION }}' \
+            '--hl2sdk-root=${{ steps.path_helper.outputs.dependencies }}' \
+            '--mysql-path=${{ steps.path_helper.outputs.dependencies }}/mysql-${{ env.MYSQL_VERSION }}' \
+            '--mysql64-path=${{ steps.path_helper.outputs.dependencies }}/mysql-${{ env.MYSQL_VERSION }}-x86_64'
+          ambuild
+
+      - name: Package
+        id: package
+        working-directory: sourcemod/build/package
+        shell: bash
+        run: |
+          version_base=$(cat ../../product.version)
+          version_base=${version_base%-dev} # Ex. 1.13.0
+          version_rev=$(git rev-list --count HEAD)
+          version="${version_base}.${version_rev}"
+          expanded_version="${version_base}-git${version_rev}"
+
+          if [ "${{ matrix.platform}}" == "windows" ]; then
+            filename="sourcemod-${expanded_version}-${{ matrix.platform }}.zip"
+            7z a "$filename" addons cfg
+            content_type="application/zip"
+          else
+            filename="sourcemod-${expanded_version}-${{ matrix.platform }}.tar.gz"
+            tar zcf "$filename" addons cfg
+            content_type="application/gzip"
+          fi
+          echo "version=$version" >> $GITHUB_OUTPUT
+          echo "expanded_version=$expanded_version" >> $GITHUB_OUTPUT
+          echo "filename=$filename" >> $GITHUB_OUTPUT
+          echo "content_type=$content_type" >> $GITHUB_OUTPUT
+
+      - name: Create Draft Release
+        id: create_release
+        uses: ncipollo/release-action@v1.21.0
+        with:
+          allowUpdates: true
+          replacesArtifacts: true
+          omitBodyDuringUpdate: true
+          omitDraftDuringUpdate: true
+          omitNameDuringUpdate: true
+          omitPrereleaseDuringUpdate: true
+
+          # This gets overly large and meaningless with our existing release patterns
+          omitBody: true
+
+          artifacts: sourcemod/build/package/${{ steps.package.outputs.filename }}
+          artifactContentType: ${{ steps.package.outputs.content_type }}
+          artifactErrorsFailBuild: true
+
+          tag: sms-1.13
+          commit: ${{ github.sha }}
+
+          draft: true
+          prerelease: true
+          makeLatest: false
+          token: ${{ secrets.GITHUB_TOKEN }}
