@@ -49,6 +49,9 @@
 #include <bridge/include/IVEngineServerBridge.h>
 #include <bridge/include/CoreProvider.h>
 
+// smsharp: .smxs (C# plugin) load branch (M1/01 change 3)
+#include <smsharp/ClrHost.h>
+
 #define SOURCEMOD_PLUGINAPI_VERSION     7
 
 CPluginManager g_PluginSys;
@@ -481,13 +484,24 @@ void CPlugin::Call_OnLibraryAdded(const char *lib)
 }
 
 // Only called during plugin construction.
+// smsharp: check if plugin is a C# plugin (.smxs suffix), used by TryCompile branch (M1/01 change 3)
+static inline bool IsCSharpPlugin(const char* filename)
+{
+	const char* ext = strrchr(filename, '.');
+	return ext && strcmp(ext, ".smxs") == 0;
+}
+
 bool CPlugin::TryCompile()
 {
 	char fullpath[PLATFORM_MAX_PATH];
 	g_pSM->BuildPath(Path_SM, fullpath, sizeof(fullpath), "plugins/%s", m_filename);
 
 	char loadmsg[255];
-	m_pRuntime.reset(g_pPawnEnv->LoadBinaryFromFile(fullpath, loadmsg, sizeof(loadmsg)));
+	if (IsCSharpPlugin(m_filename)) {
+		m_pRuntime.reset(smsharp::ClrHost::LoadCSharpAssembly(fullpath, loadmsg, sizeof(loadmsg)));
+	} else {
+		m_pRuntime.reset(g_pPawnEnv->LoadBinaryFromFile(fullpath, loadmsg, sizeof(loadmsg)));
+	}
 	if (!m_pRuntime) {
 		EvictWithError(Plugin_BadLoad, "Unable to load plugin (%s)", loadmsg);
 		return false;
@@ -908,8 +922,11 @@ void CPluginManager::LoadPluginsFromDir(const char *basedir, const char *localpa
 		} else if (dir->IsEntryFile()) {
 			const char *name = dir->GetEntryName();
 			size_t len = strlen(name);
-			if (len >= 4
-				&& strcmp(&name[len-4], ".smx") == 0)
+			// Both conditions must carry their own length guard: a non-.smx file
+			// with len==4 (e.g. "test") would make &name[len-5] read 1 byte
+			// before the buffer (out-of-bounds UB)
+			if ((len >= 4 && strcmp(&name[len-4], ".smx") == 0)
+			 || (len >= 5 && strcmp(&name[len-5], ".smxs") == 0))   // .smxs is a 5-char suffix, offset len-5
 			{
 				/* If the filename matches, load the plugin */
 				char plugin[PLATFORM_MAX_PATH];
@@ -982,9 +999,9 @@ IPlugin *CPluginManager::LoadPlugin(const char *path, bool debug, PluginType typ
 	}
 
 	const char *ext = libsys->GetFileExtension(path);
-	if (!ext || strcmp(ext, "smx") != 0)
+	if (!ext || (strcmp(ext, "smx") != 0 && strcmp(ext, "smxs") != 0))
 	{
-		ke::SafeStrcpy(error, maxlength, "Plugin files must have the \".smx\" file extension");
+		ke::SafeStrcpy(error, maxlength, "Plugin files must have the \".smx\" or \".smxs\" file extension");
 		return NULL;
 	}
 

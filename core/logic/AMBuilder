@@ -10,6 +10,7 @@ for cxx in builder.targets:
     os.path.join(builder.sourcePath, 'sourcepawn', 'include'),
     os.path.join(builder.sourcePath, 'public', 'amtl', 'amtl'),
     os.path.join(builder.sourcePath, 'public', 'amtl'),
+    os.path.join(builder.sourcePath, 'smsharp', 'cpp', 'include'),  # <smsharp/ClrHost.h> (M1/01 change 4b)
     os.path.join(SM.mms_root, 'core', 'sourcehook')
   ]
   binary.compiler.defines += [
@@ -29,6 +30,8 @@ for cxx in builder.targets:
     SP.static_libsp[arch],
     SP.libamtl[arch],
     SP.zlib[arch],
+    # smsharp C++ core (libsmsharp_core, see smsharp/cpp/AMBuilder) - M1/01 change 4b
+    SM.smsharp_core_lib[arch],
   ]
 
   if binary.compiler.family == 'gcc' or binary.compiler.family == 'clang':

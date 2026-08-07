@@ -650,6 +650,11 @@ SP = builder.Build('sourcepawn/AMBuildScript', {
   'external_build': SP_build_parts,
 })
 
+# Build smsharp C++ core externally (libsmsharp_core, form B: static lib linked into sourcemod.logic).
+# Output path stored in SM.smsharp_core_lib[arch], consumed by core/logic/AMBuilder (M1/01 change 4a).
+SM.smsharp_core_lib = {}
+builder.Build('smsharp/cpp/AMBuilder', { 'SM': SM, 'SP': SP })
+
 def IsBetterDefaultSpcomp(spcomp, other):
     if other is None:
         return True
