@@ -36,6 +36,9 @@
 #include "Logger.h"
 #include "sourcepawn/vm/base-runtime.h"
 #include "sourcepawn/vm/environment.h"
+// M5.5: shared error slot write point + C# trace segment print (SM-side change #4,
+// form B static link resolves smsharp symbols in the same binary; no SP dependency).
+#include <smsharp/ClrHost.h>
 
 DebugReport g_DbgReporter;
 
@@ -126,6 +129,15 @@ void DebugReport::ReportError(const IErrorReport &report, IFrameIterator &iter)
 	if (report.Code() == SP_ERROR_NOT_RUNNABLE)
 		return;
 
+	// M5.5: write the shared error slot for C# wrapper detection. This listener is
+	// always registered in production (common_logic.cpp SetDebugListener) and
+	// DispatchReport unconditionally calls debugger_->ReportError, so coverage is
+	// equivalent to the SP error funnel (JIT runtime errors, watchdog, fake native
+	// providers included). Runs after the NOT_RUNNABLE early return above: that error
+	// produces no log, so the slot is not written either. ClrHost null-checks the slot
+	// pointer (lazy CLR init: no-op on pure SP servers).
+	smsharp::ClrHost::SetSMErrorSlot(report.Code());
+
 	const char *blame = nullptr;
 	if (report.Blame()) 
 	{
@@ -162,6 +174,13 @@ void DebugReport::ReportError(const IErrorReport &report, IFrameIterator &iter)
 	{
 		g_Logger.LogError("%s", arr[i].c_str());
 	}
+
+	// M5.5: print the C# trace segment written by the C# exception handler. The
+	// implementation lives in smsharp (ClrHost::PrintCSharpErrorTrace, shared with the
+	// InvokeImpl native-failed path) and logs through the SM error log; single
+	// consumption (clears after read). This report path is the only trigger here:
+	// the LogStackTrace native calls GetStackTrace directly, not this function.
+	smsharp::ClrHost::PrintCSharpErrorTrace();
 }
 
 std::vector<std::string> DebugReport::GetStackTrace(IFrameIterator *iter)
