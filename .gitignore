@@ -41,3 +41,6 @@ objdir
 
 .vs/*
 .vscode/*
+
+# AI agent
+AGENTS.md
