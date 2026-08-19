@@ -13,6 +13,35 @@ env:
   MMSOURCE_VERSION: '1.12'
 
 jobs:
+  smsharp-m6:
+    name: smsharp M6 (${{ matrix.configuration }})
+    runs-on: windows-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        configuration: [Debug, Release]
+    steps:
+      - name: Checkout SourceMod
+        uses: actions/checkout@v7
+        with:
+          path: sourcemod
+          fetch-depth: 0
+          submodules: recursive
+          token: ${{ secrets.SUBMODULE_DEPLOY_KEY }}
+
+      - name: Setup .NET 6 runtime and .NET 10 SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: |
+            6.0.x
+            10.0.x
+
+      - name: Validate SourceModSharp M6
+        working-directory: sourcemod/smsharp
+        shell: pwsh
+        run: ./tools/test-m6.ps1 -Configuration ${{ matrix.configuration }}
+
   build:
     strategy:
       matrix:
