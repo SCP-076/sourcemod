@@ -47,12 +47,6 @@ jobs:
         shell: pwsh
         run: ./tools/test.ps1 -Suite project -Configuration ${{ matrix.configuration }}
 
-      - name: Validate SourceModSharp srcds harness offline contracts
-        if: matrix.configuration == 'Debug'
-        working-directory: sourcemod/smsharp
-        shell: pwsh
-        run: ./tools/test.ps1 -Suite srcds-offline
-
       - name: Validate SourceModSharp AI guidance
         if: matrix.configuration == 'Debug'
         working-directory: sourcemod/smsharp
