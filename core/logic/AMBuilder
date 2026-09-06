@@ -8,6 +8,8 @@ for cxx in builder.targets:
     os.path.join(builder.sourcePath, 'core', 'logic'),
     os.path.join(builder.sourcePath, 'public'),
     os.path.join(builder.sourcePath, 'sourcepawn', 'include'),
+    os.path.join(builder.sourcePath, 'sourcepawn'),
+    os.path.join(builder.sourcePath, 'sourcepawn', 'vm'),
     os.path.join(builder.sourcePath, 'public', 'amtl', 'amtl'),
     os.path.join(builder.sourcePath, 'public', 'amtl'),
     os.path.join(builder.sourcePath, 'smsharp', 'cpp', 'include'),  # <smsharp/ClrHost.h> (M1/01 change 4b)
@@ -25,14 +27,15 @@ for cxx in builder.targets:
     binary.compiler.cflags += ['-Wno-deprecated-declarations']
     binary.compiler.postlink += ['-framework', 'CoreServices', '-lm']
 
-  arch = binary.compiler.target.arch
+  target = binary.compiler.target
   binary.compiler.linkflags += [
-    SP.static_libsp[arch],
-    SP.libamtl[arch],
-    SP.zlib[arch],
-    # smsharp C++ core (libsmsharp_core, see smsharp/cpp/AMBuilder) - M1/01 change 4b
-    SM.smsharp_core_lib[arch],
+    SP.static_libsp[target],
+    SP.libamtl[target],
+    SP.zlib[target],
+    SP.mimalloc[target],
   ]
+  # smsharp C++ core (libsmsharp_core, see smsharp/cpp/AMBuilder) - M1/01 change 4b
+  binary.compiler.linkflags += [SM.smsharp_core_lib[target]]
 
   if binary.compiler.family == 'gcc' or binary.compiler.family == 'clang':
     binary.compiler.cxxflags += ['-fno-rtti', '-Wno-invalid-offsetof']

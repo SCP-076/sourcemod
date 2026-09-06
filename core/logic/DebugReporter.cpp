@@ -130,10 +130,10 @@ void DebugReport::ReportError(const IErrorReport &report, IFrameIterator &iter)
 		return;
 
 	// M5.5: write the shared error slot for C# wrapper detection. This listener is
-	// always registered in production (common_logic.cpp SetDebugListener) and
-	// DispatchReport unconditionally calls debugger_->ReportError, so coverage is
-	// equivalent to the SP error funnel (JIT runtime errors, watchdog, fake native
-	// providers included). Runs after the NOT_RUNNABLE early return above: that error
+	// always registered in production (common_logic.cpp SetDebugListener). SP may
+	// defer reporting until a valid JIT exit frame is available; this slot is written
+	// when ReportError actually receives the report. Runs after the NOT_RUNNABLE
+	// early return above: that error
 	// produces no log, so the slot is not written either. ClrHost null-checks the slot
 	// pointer (lazy CLR init: no-op on pure SP servers).
 	smsharp::ClrHost::SetSMErrorSlot(report.Code());
