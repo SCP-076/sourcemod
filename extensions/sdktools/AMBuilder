@@ -40,7 +40,7 @@ for sdk_name in SM.sdks:
     SM.AddCDetour(binary)
 
     if sdk['name'] == 'l4d2':
-      builder.Build(os.path.join(builder.sourcePath, 'smsharp', 'tools', 'entity-schema', 'AMBuilder'), {'binary': binary})
+      binary.sources += [os.path.join(builder.sourcePath, 'smsharp', 'tools', 'entity-schema', 'export.cpp')]
     
     binary.compiler.cxxincludes += [
       os.path.join(builder.sourcePath, 'public', 'jit'),
