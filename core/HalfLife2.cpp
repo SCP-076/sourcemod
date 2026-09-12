@@ -1706,3 +1706,4 @@ bool CHalfLife2::RemoveSendPropCache(const char *classname)
 	return m_Classes.remove(classname);
 }
 
+#include <smsharp/cpp/src/EntityListProvider.inc>
