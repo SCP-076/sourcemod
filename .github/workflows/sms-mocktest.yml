@@ -59,8 +59,6 @@ jobs:
           mkdir ../gamedir
           ./build_gamedir.sh ../gamedir ../metamod-source/objdir/package
           ./build_gamedir.sh ../gamedir ../sourcemod/objdir/package
-          # The mock engine loads every VDF, without architecture filtering.
-          rm ../gamedir/addons/metamod.vdf ../gamedir/addons/metamod_x64.vdf
 
       - name: Compile testsuite
         working-directory: hl2sdk-mock
@@ -78,26 +76,6 @@ jobs:
         shell: bash
         run: |
           for arch in x86 x86_64; do
-            case "$arch" in
-              x86)
-                metamod_vdf=metamod.vdf
-                tier0=tier0_i486.so
-                vstdlib=vstdlib_i486.so
-                ;;
-              x86_64)
-                metamod_vdf=metamod_x64.vdf
-                tier0=libtier0_client.so
-                vstdlib=libvstdlib_client.so
-                ;;
-            esac
-            ln -sfn "$(realpath -e ../metamod-source/objdir/package/addons/$metamod_vdf)" ../gamedir/addons/metamod.vdf
-            # Reuse the engine's libraries: loading renamed copies twice can
-            # reinitialize shared globals such as the mock command line.
-            ln -sfn "$tier0" "./objdir/dist/$arch/libtier0.so"
-            ln -sfn "$vstdlib" "./objdir/dist/$arch/libvstdlib.so"
-            # Metamod's mock dependencies use libtier0.so/libvstdlib.so.
-            # The executable's RUNPATH does not cover dlopen dependencies.
-            export LD_LIBRARY_PATH="$(realpath -e ./objdir/dist/$arch)"
             echo "==================================="
             echo "Testing $arch..."
             echo "==================================="
@@ -125,10 +103,3 @@ jobs:
               }
             done
           done
-
-      - name: Report Metamod load failures
-        if: failure()
-        working-directory: hl2sdk-mock
-        shell: bash
-        run: |
-          find ../gamedir ../metamod-source/objdir/package -type f -name metamod-fatal.log -print -exec cat {} \;
