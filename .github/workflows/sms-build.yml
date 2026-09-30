@@ -5,6 +5,14 @@ on:
       - sms-1.13
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+# Every ref writes to the same internal Draft; do not interrupt asset uploads.
+concurrency:
+  group: sms-1.13-draft
+  cancel-in-progress: false
+
 env:
   ARCH: x86
   SDKS: '["l4d2"]'
@@ -55,6 +63,9 @@ jobs:
         run: ./tools/check-ai-guidance.ps1
 
   build:
+    needs: [smsharp-tests]
+    permissions:
+      contents: write
     strategy:
       matrix:
         include:
@@ -124,6 +135,44 @@ jobs:
             '--mariadb64-path=${{ steps.path_helper.outputs.dependencies }}/mariadb-connector-c-${{ env.MARIADB_CONNECTOR_C_VERSION }}-x86_64'
           ambuild
 
+      - name: Check Linux x86 exports
+        if: matrix.platform == 'linux'
+        working-directory: sourcemod
+        shell: bash
+        env:
+          LC_ALL: C
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+
+          binaries = {
+              "sourcemod_mm_i486.so": {"CreateInterface_MMS", "UnloadInterface_MMS"},
+              "sourcemod.2.l4d2.so": {"CreateInterface"},
+              "sourcemod.logic.so": {"logic_load"},
+          }
+          # These definitions come from libstdc++.a, not SourceMod's public ABI.
+          private_runtime = {
+              "__cxa_throw", "__cxa_allocate_exception", "__gxx_personality_v0",
+              "_ZSt17__throw_bad_allocv", "_ZSt20__throw_length_errorPKc",
+          }
+          for name, required in binaries.items():
+              path = Path("build/package/addons/sourcemod/bin") / name
+              with path.open("rb") as binary:
+                  header = binary.read(20)
+              if header[:6] != b"\x7fELF\x01\x01" or header[18:20] != b"\x03\x00":
+                  raise SystemExit(f"Expected Linux x86 ELF: {path}")
+              output = subprocess.check_output(
+                  ["nm", "-D", "--defined-only", str(path)], text=True)
+              symbols = {line.split()[-1].split("@")[0]
+                         for line in output.splitlines() if line.split()}
+              missing = required - symbols
+              leaked = private_runtime & symbols
+              if missing or leaked:
+                  raise SystemExit(f"{name}: missing={sorted(missing)}, leaked={sorted(leaked)}")
+              print(f"{name}: x86, exports={sorted(required)}, libstdc++ probes hidden")
+          PY
+
       - name: Package
         id: package
         working-directory: sourcemod/build/package
@@ -132,23 +181,67 @@ jobs:
           version_base=$(cat ../../product.version)
           version_base=${version_base%-dev} # Ex. 1.13.0
           version_rev=$(git rev-list --count HEAD)
-          version="${version_base}.${version_rev}"
           expanded_version="${version_base}-git${version_rev}"
 
           if [ "${{ matrix.platform}}" == "windows" ]; then
             filename="sourcemod-${expanded_version}-${{ matrix.platform }}.zip"
             7z a "$filename" addons cfg
-            content_type="application/zip"
           else
             filename="sourcemod-${expanded_version}-${{ matrix.platform }}.tar.gz"
             tar zcf "$filename" addons cfg
-            content_type="application/gzip"
           fi
-          echo "version=$version" >> $GITHUB_OUTPUT
-          echo "expanded_version=$expanded_version" >> $GITHUB_OUTPUT
           echo "filename=$filename" >> $GITHUB_OUTPUT
-          echo "content_type=$content_type" >> $GITHUB_OUTPUT
 
+      - name: Record package identity
+        working-directory: sourcemod
+        shell: bash
+        env:
+          PACKAGE_PLATFORM: ${{ matrix.platform }}
+          PACKAGE_FILENAME: ${{ steps.package.outputs.filename }}
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+
+          def git(*args):
+              return subprocess.check_output(["git", *args], text=True).strip()
+
+          source = {"sourcemod": git("rev-parse", "HEAD")}
+          if source["sourcemod"] != os.environ["GITHUB_SHA"]:
+              raise SystemExit("Checkout does not match the workflow SHA")
+          for module in ("smsharp", "sourcepawn"):
+              pinned = git("ls-tree", "HEAD", module).split()[2]
+              actual = git("-C", module, "rev-parse", "HEAD")
+              if actual != pinned:
+                  raise SystemExit(f"{module}: checkout does not match its gitlink")
+              source[module] = actual
+
+          package = Path("build/package") / os.environ["PACKAGE_FILENAME"]
+          digest = hashlib.sha256()
+          with package.open("rb") as stream:
+              for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                  digest.update(chunk)
+          identity = {
+              "schema": 1,
+              "run_id": os.environ["GITHUB_RUN_ID"],
+              "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "source": source,
+              "platform": os.environ["PACKAGE_PLATFORM"],
+              "arch": os.environ["ARCH"],
+              "sdks": json.loads(os.environ["SDKS"]),
+              "filename": package.name,
+              "sha256": digest.hexdigest(),
+          }
+          package.with_name(f"sms-package-{identity['platform']}.json").write_text(
+              json.dumps(identity, indent=2) + "\n", encoding="utf-8")
+          PY
+
+      # Keep private-submodule binaries in the existing Draft, not public run artifacts.
+      # Platform uploads are not atomic: consume only after both workflows pass and
+      # both platform manifests match the run ID and all source SHAs. Attempts may differ.
       - name: Create Draft Release
         id: create_release
         uses: ncipollo/release-action@v1.21.0
@@ -163,11 +256,12 @@ jobs:
           # This gets overly large and meaningless with our existing release patterns
           omitBody: true
 
-          artifacts: sourcemod/build/package/${{ steps.package.outputs.filename }}
-          artifactContentType: ${{ steps.package.outputs.content_type }}
+          artifacts: sourcemod/build/package/${{ steps.package.outputs.filename }},sourcemod/build/package/sms-package-${{ matrix.platform }}.json
+          artifactContentType: application/octet-stream
           artifactErrorsFailBuild: true
 
           tag: sms-1.13
+          # The manifest records the source SHA; this does not move an existing tag.
           commit: ${{ github.sha }}
 
           draft: true
