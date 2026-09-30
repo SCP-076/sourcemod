@@ -245,7 +245,13 @@ DHooksManager::DHooksManager(HookSetup *setup, void *iface, IPluginFunction *rem
 	this->remove_callback = remove_callback;
 	this->callback->offset = setup->offset;
 	this->callback->plugin_callback = plugincb;
+
+	// Temporary fix for legacy vhook Address ABI detection. Upstream PR#2403
+	// initializes it in Capsule::AddCallback; see:
+	// https://github.com/alliedmodders/sourcemod/commit/64f00792fa21c128c15dd38eada72979cdba0274
+	// On merge, remove this local fix only once equivalent upstream initialization is present.
 	this->callback->int64_address = plugincb->GetParentRuntime()->FindPubvarByName("__Int64_Address__", nullptr) == SP_ERROR_NONE;
+	
 	this->callback->returnFlag = setup->returnFlag;
 	this->callback->thisType = setup->thisType;
 	this->callback->post = post;
